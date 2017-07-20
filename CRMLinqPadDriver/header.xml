@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8" ?>
+   <DataContextDriver>
+      <MainAssembly>CRMLinqPadDriver.dll</MainAssembly>
+      <SupportUri>http://blogs.msdn.com/crminthefield</SupportUri>
+   </DataContextDriver>
