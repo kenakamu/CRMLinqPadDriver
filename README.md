@@ -14,4 +14,6 @@ Please let us know what's working, what isn't, as well as suggestions for new ca
 In addition to providing feedback on this project site, we'd love to hear directly from you! See what we're up to via our MSDN blog, CRM in the Field or follow us on Twitter: @pfedynamics
 
 ## Additional Information
-This solution uses CrmOrganizationServiceContext for LINQ capability, which uses SOAP and displays corresponding QueryExpression and FetchXML. As this endpoint is deprecated with latest version of Dynamics 365, please use the Web API version instead. (CRMLinqPadDriverWebAPI)[https://github.com/kenakamu/CRMLinqPadDriverWebAPI]
+This solution uses CrmOrganizationServiceContext for LINQ capability, which uses SOAP and displays corresponding QueryExpression and FetchXML. 
+
+As this endpoint is deprecated with latest version of Dynamics 365, please use the Web API version instead. (CRMLinqPadDriverWebAPI)[https://github.com/kenakamu/CRMLinqPadDriverWebAPI]
