@@ -22,6 +22,7 @@ using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.ServiceModel.Description;
 using System.Threading.Tasks;
 using System.Windows;
@@ -120,6 +121,11 @@ namespace Microsoft.Pfe.Xrm.ViewModel
         /// </summary>
         private void LoadData()
         {
+            AppDomain.CurrentDomain.AssemblyResolve += (o, args) =>
+            {
+                var name = new AssemblyName(args.Name);
+                return name.Name == "Microsoft.Xrm.Sdk" ? typeof(Microsoft.Xrm.Sdk.Entity).Assembly : null;
+            };
             // Generate code by using CrmSvcUtil.exe
             string code = GenerateCode(props);
             
