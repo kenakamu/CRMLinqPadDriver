@@ -140,7 +140,7 @@ namespace Microsoft.Pfe.Xrm
                         crmConn = new CrmServiceClient(String.Format("Url={0}; Domain={1}; Username={2}; Password={3};", props.OrgUri, props.DomainName, props.UserName, props.Password));
                     break;
                 case AuthenticationProviderType.Federation:
-                    crmConn = new CrmServiceClient(String.Format("AuthType=IFD; Url={0}; Username={1}; Password={2};", props.OrgUri, props.UserName, props.Password));
+                    crmConn = new CrmServiceClient(String.Format("AuthType=IFD; Url={0}{4}; Domain={3}; Username={1}; Password={2};", props.OrgUri, props.UserName, props.Password, props.DomainName, props.ConnectedOrgUniqueName));
                     break;
             }
             if (crmConn != null && crmConn.IsReady)
