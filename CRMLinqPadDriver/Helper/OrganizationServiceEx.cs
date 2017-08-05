@@ -13,12 +13,11 @@
 
  =================================================================================================================================*/
 
-using Microsoft.Xrm.Client;
-using Microsoft.Xrm.Client.Services;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using System;
+using Microsoft.Xrm.Tooling.Connector;
 
 namespace Microsoft.Pfe.Xrm.Helper
 {
@@ -26,16 +25,38 @@ namespace Microsoft.Pfe.Xrm.Helper
     /// Extended OrganiztaionService which exposed PreExecute event to obtain 
     /// QueryExpression before executing RetrieveMutliple
     /// </summary>
-    public class OrganizationServiceEx : OrganizationService
+    public class OrganizationServiceEx : IOrganizationService
     {
+        private CrmServiceClient _service;
         public event EventHandler<PreExecuteEventArgs> PreExecute;
 
         /// <summary>
         /// Constructor. Pass CrmConnection to base.
         /// </summary>
         /// <param name="cnn">CrmConnection</param>
-        public OrganizationServiceEx(CrmConnection cnn):base(cnn)
-        {            
+        public OrganizationServiceEx(CrmServiceClient cnn)
+        {
+            this._service = cnn;
+        }
+
+        public Guid Create(Entity entity)
+        {
+            return _service.Create(entity);
+        }
+
+        public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet)
+        {
+            return _service.Retrieve(entityName,id,columnSet);
+        }
+
+        public void Update(Entity entity)
+        {
+            _service.Update(entity);
+        }
+
+        public void Delete(string entityName, Guid id)
+        {
+            _service.Delete(entityName,id);
         }
 
         /// <summary>
@@ -43,14 +64,29 @@ namespace Microsoft.Pfe.Xrm.Helper
         /// </summary>
         /// <param name="request">OrganizationRequest</param>
         /// <returns>OrganizationResponse</returns>
-        public override OrganizationResponse Execute(OrganizationRequest request)
+        public OrganizationResponse Execute(OrganizationRequest request)
         {
             // If request is RetrieveMultipleReuqest, and Query is QueryExpression, then propagate to Event.
-            if(request is RetrieveMultipleRequest && (request as RetrieveMultipleRequest).Query is QueryExpression)
+            if (request is RetrieveMultipleRequest && (request as RetrieveMultipleRequest).Query is QueryExpression)
             {
                 this.PreExecute(this, new PreExecuteEventArgs((request as RetrieveMultipleRequest).Query as QueryExpression));
             }
-            return base.Execute(request);
+            return _service.Execute(request);
+        }
+
+        public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
+        {
+            _service.Associate(entityName, entityId, relationship, relatedEntities);
+        }
+
+        public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
+        {
+            _service.Disassociate(entityName, entityId, relationship, relatedEntities);
+        }
+
+        public EntityCollection RetrieveMultiple(QueryBase query)
+        {
+            return _service.RetrieveMultiple(query);
         }
     }
 
