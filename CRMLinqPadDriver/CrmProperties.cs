@@ -13,10 +13,12 @@
 
  =================================================================================================================================*/
 
+using System;
 using LINQPad.Extensibility.DataContext;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using Microsoft.Xrm.Sdk.Client;
 
 namespace Microsoft.Pfe.Xrm
 {
@@ -46,9 +48,15 @@ namespace Microsoft.Pfe.Xrm
             set { _driverData.SetElementValue("OrgUri", value); }
         }
 
-        public string AuthenticationProviderType
+        public AuthenticationProviderType AuthenticationProviderType
         {
-            get { return (string)_driverData.Element("AuthenticationProviderType") ?? ""; }
+            get
+            {
+                var authProviderType = _driverData.Element("AuthenticationProviderType");
+                return authProviderType != null
+                    ? (AuthenticationProviderType)Enum.Parse(typeof(AuthenticationProviderType), authProviderType.Value)
+                    : AuthenticationProviderType.None;
+            }
             set { _driverData.SetElementValue("AuthenticationProviderType", value); }
         }
 
@@ -76,6 +84,12 @@ namespace Microsoft.Pfe.Xrm
         {
             get { return (string)_driverData.Element("FriendlyName") ?? ""; }
             set { _driverData.SetElementValue("FriendlyName", value); }
+        }
+
+        public string ConnectedOrgUniqueName
+        {
+            get { return (string)_driverData.Element("ConnectedOrgUniqueName") ?? ""; }
+            set { _driverData.SetElementValue("ConnectedOrgUniqueName", value); }
         }
 
         /// <summary>

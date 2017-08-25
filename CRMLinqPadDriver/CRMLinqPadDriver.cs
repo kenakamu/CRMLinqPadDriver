@@ -17,8 +17,6 @@ using LINQPad.Extensibility.DataContext;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Pfe.Xrm.Helper;
 using Microsoft.Pfe.Xrm.View;
-using Microsoft.Xrm.Client;
-using Microsoft.Xrm.Client.Services;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Tooling.Connector;
 using System;
@@ -30,6 +28,7 @@ using System.Runtime.Serialization;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using Microsoft.Xrm.Sdk.Client;
 
 namespace Microsoft.Pfe.Xrm
 {
@@ -79,7 +78,7 @@ namespace Microsoft.Pfe.Xrm
         public override void InitializeContext(IConnectionInfo cxInfo, object context, QueryExecutionManager executionManager)
         {
             // Attach PreExecute event.
-            orgService.PreExecute += (s, e) => 
+            orgService.PreExecute += (s, e) =>
             {
                 // Take QueryExpression and convert it to FetchXML.
                 QueryExpressionToFetchXmlRequest request = new QueryExpressionToFetchXmlRequest { Query = e.query };
@@ -90,7 +89,7 @@ namespace Microsoft.Pfe.Xrm
                 using (MemoryStream stream = new MemoryStream())
                 {
                     // Use XmlWriter with Indent.
-                    using (XmlWriter writer = XmlWriter.Create(stream, new XmlWriterSettings{ Indent = true}))
+                    using (XmlWriter writer = XmlWriter.Create(stream, new XmlWriterSettings { Indent = true }))
                     {
                         serializer.WriteObject(writer, e.query);
                     }
@@ -99,8 +98,8 @@ namespace Microsoft.Pfe.Xrm
                     executionManager.SqlTranslationWriter.WriteLine("QueryExpression:");
                     executionManager.SqlTranslationWriter.WriteLine(Encoding.UTF8.GetString(stream.GetBuffer()));
                     executionManager.SqlTranslationWriter.WriteLine();
-                }        
-       
+                }
+
                 // Display FetchXml as well.
                 using (MemoryStream stream = new MemoryStream())
                 {
@@ -113,11 +112,11 @@ namespace Microsoft.Pfe.Xrm
                     executionManager.SqlTranslationWriter.WriteLine("FetchXml:");
                     executionManager.SqlTranslationWriter.WriteLine(Encoding.UTF8.GetString(stream.GetBuffer()).Replace("\"", "\'"));
                 }
-            };            
+            };
 
             base.InitializeContext(cxInfo, context, executionManager);
         }
-        
+
         /// <summary>
         /// Pass Extended OrganizationService to context
         /// </summary>
@@ -128,29 +127,31 @@ namespace Microsoft.Pfe.Xrm
             // Instantiate CrmProperties.
             CrmProperties props = new CrmProperties(cxInfo);
             // Create CrmConnection depending on connection type.
-            CrmConnection crmConn =null;
+            CrmServiceClient crmConn = null;
             switch (props.AuthenticationProviderType)
             {
-                case "OnlineFederation":
-                    crmConn = CrmConnection.Parse(String.Format("Url={0}; Username={1}; Password={2};", props.OrgUri, props.UserName, props.Password));
+                case AuthenticationProviderType.OnlineFederation:
+                    crmConn = new CrmServiceClient(String.Format("AuthType=Office365; Username={1}; Password={2}; Url={0}", props.OrgUri, props.UserName, props.Password));
                     break;
-                case "ActiveDirectory":
-                    if(String.IsNullOrEmpty(props.DomainName))
-                        crmConn = CrmConnection.Parse(String.Format("Url={0};", props.OrgUri));
+                case AuthenticationProviderType.ActiveDirectory:
+                    if (String.IsNullOrEmpty(props.DomainName))
+                        crmConn = new CrmServiceClient(String.Format("Url={0};", props.OrgUri));
                     else
-                        crmConn = CrmConnection.Parse(String.Format("Url={0}; Domain={1}; Username={2}; Password={3};", props.OrgUri, props.DomainName, props.UserName, props.Password));
+                        crmConn = new CrmServiceClient(String.Format("Url={0}; Domain={1}; Username={2}; Password={3};", props.OrgUri, props.DomainName, props.UserName, props.Password));
                     break;
-                case "Federation":
-                    crmConn = CrmConnection.Parse(String.Format("Url={0}; Username={1}; Password={2};", props.OrgUri, props.UserName, props.Password));
+                case AuthenticationProviderType.Federation:
+                    crmConn = new CrmServiceClient(String.Format("AuthType=IFD; Url={0}{4}; Domain={3}; Username={1}; Password={2};", props.OrgUri, props.UserName, props.Password, props.DomainName, props.ConnectedOrgUniqueName));
                     break;
             }
-            // Instantiate Extended OrganizationService.
-            orgService = new OrganizationServiceEx(crmConn);
-            
+            if (crmConn != null && crmConn.IsReady)
+            {
+                orgService = new OrganizationServiceEx(crmConn);
+            }
+
             return new object[]
             {
-                new OrganizationService(orgService)
-            };             
+                orgService
+            };
         }
 
         /// <summary>
@@ -163,7 +164,7 @@ namespace Microsoft.Pfe.Xrm
             return new ParameterDescriptor[]
             {
                 // OrgainzationService is the only constructor argument.
-                new ParameterDescriptor("OrganizationService", "Microsoft.Xrm.Client.Services.OrganizationService")
+                new ParameterDescriptor("OrganizationService", "Microsoft.Xrm.Sdk.IOrganizationService")
             };
         }
 
@@ -180,7 +181,7 @@ namespace Microsoft.Pfe.Xrm
                 "System.Runtime.Serialization.dll",
                 "Microsoft.Crm.Sdk.Proxy.dll",
                 "Microsoft.Xrm.Sdk.dll",
-                "Microsoft.Xrm.Client.dll"
+                "Microsoft.Xrm.Tooling.Connector.dll"
             };
         }
 
@@ -201,8 +202,8 @@ namespace Microsoft.Pfe.Xrm
                 "Microsoft.Xrm.Sdk.Metadata",
                 "Microsoft.Crm.Sdk.Messages",
                 "Microsoft.Xrm.Sdk.Discovery",
-                "Microsoft.Xrm.Client",
-                "Microsoft.Xrm.Client.Services"
+                "Microsoft.Xrm.Tooling.Connector",
+                "Microsoft.Pfe.Xrm"
             };
         }
 

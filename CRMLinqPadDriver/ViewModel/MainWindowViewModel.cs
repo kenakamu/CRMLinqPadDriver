@@ -22,11 +22,15 @@ using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.ServiceModel.Description;
 using System.Threading.Tasks;
 using System.Windows;
+using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Discovery;
+using Microsoft.Xrm.Tooling.Connector;
 
 namespace Microsoft.Pfe.Xrm.ViewModel
 {
@@ -100,7 +104,7 @@ namespace Microsoft.Pfe.Xrm.ViewModel
             IsLoaded = false;
             props = new CrmProperties(cxInfo);
             IsNewConnection = isNewConnection;
-        }        
+        }
 
         /// <summary>
         /// Raised when the login form process is completed.
@@ -121,14 +125,9 @@ namespace Microsoft.Pfe.Xrm.ViewModel
         /// </summary>
         private void LoadData()
         {
-            AppDomain.CurrentDomain.AssemblyResolve += (o, args) =>
-            {
-                var name = new AssemblyName(args.Name);
-                return name.Name == "Microsoft.Xrm.Sdk" ? typeof(Microsoft.Xrm.Sdk.Entity).Assembly : null;
-            };
             // Generate code by using CrmSvcUtil.exe
-            string code = GenerateCode(props);
-            
+            var code = GenerateCode(props);
+
             // Store assembly full path.
             string assemblyFullName = "";
             // When reload data, we need to generate new assembly as current one is hold by LinqPad instance.
@@ -143,10 +142,10 @@ namespace Microsoft.Pfe.Xrm.ViewModel
             // Compile the code into the assembly. To avoid duplicate name for each connection, hash entire URL to make it unique.
             BuildAssembly(code, assemblyFullName);
 
-            // Then delete generated file.
-            File.Delete(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "XrmData.cs"));
-
+            // Then delete generated files.
+            Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.cs").ToList().ForEach(File.Delete);
             // Update message.
+            LoadMessage = "";
             Message = "Loading Complete. Click Exit and wait a while until Linq Pad displays full Schema information.";
             IsLoaded = true;
         }
@@ -159,8 +158,45 @@ namespace Microsoft.Pfe.Xrm.ViewModel
         /// </summary>
         /// <param name="props">CRM Properties</param>
         /// <returns>Generate code</returns>
-        private string GenerateCode(CrmProperties props)
-        {            
+        private string[] GenerateCode(CrmProperties props)
+        {
+            return new []
+            {
+                ExecuteCrmSvcUtil(props, CodeGenerationType.OptionSet),
+                ExecuteCrmSvcUtil(props, CodeGenerationType.Entity)
+            };
+        }
+
+        private string ExecuteCrmSvcUtil(CrmProperties props, CodeGenerationType generationType)
+        {
+            var svcUtilCodeCustomizationParams = "";
+            var generatedNameSpace = "Microsoft.Pfe.Xrm";
+            var authProviderType = "";
+            switch (props.AuthenticationProviderType)
+            {
+                case AuthenticationProviderType.OnlineFederation:
+                    authProviderType = "Office365";
+                    break;
+                case AuthenticationProviderType.ActiveDirectory:
+                    authProviderType = "AD";
+                    break;
+                case AuthenticationProviderType.Federation:
+                    authProviderType = "IFD";
+                    break;
+            }
+            if (generationType == CodeGenerationType.Entity)
+            {
+                LoadMessage = "Generating Entity classes..";
+                svcUtilCodeCustomizationParams =
+                    "/codeCustomization:\"DLaB.CrmSvcUtilExtensions.Entity.CustomizeCodeDomService,DLaB.CrmSvcUtilExtensions\" /codegenerationservice:\"DLaB.CrmSvcUtilExtensions.Entity.CustomCodeGenerationService,DLaB.CrmSvcUtilExtensions\" /codewriterfilter:\"DLaB.CrmSvcUtilExtensions.Entity.CodeWriterFilterService,DLaB.CrmSvcUtilExtensions\" /namingservice:\"DLaB.CrmSvcUtilExtensions.NamingService,DLaB.CrmSvcUtilExtensions\" /metadataproviderservice:\"DLaB.CrmSvcUtilExtensions.Entity.MetadataProviderService,DLaB.CrmSvcUtilExtensions\"";
+                generatedNameSpace = "Microsoft.Pfe.Xrm.Entities";
+            }
+            else
+            {
+                LoadMessage = "Generating Optionset enums..";
+                svcUtilCodeCustomizationParams =
+                    "/codeCustomization:\"DLaB.CrmSvcUtilExtensions.OptionSet.CreateOptionSetEnums,DLaB.CrmSvcUtilExtensions\" /codegenerationservice:\"DLaB.CrmSvcUtilExtensions.OptionSet.CustomCodeGenerationService,DLaB.CrmSvcUtilExtensions\" /codewriterfilter:\"DLaB.CrmSvcUtilExtensions.OptionSet.CodeWriterFilterService,DLaB.CrmSvcUtilExtensions\" /namingservice:\"DLaB.CrmSvcUtilExtensions.NamingService,DLaB.CrmSvcUtilExtensions\" /metadataproviderservice:\"DLaB.CrmSvcUtilExtensions.BaseMetadataProviderService,DLaB.CrmSvcUtilExtensions\"";
+            }
             // Create Process
             Process p = new Process();
 
@@ -171,19 +207,37 @@ namespace Microsoft.Pfe.Xrm.ViewModel
             p.StartInfo.CreateNoWindow = true;
             p.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
             // Assign argumemnt for CrmSvcUtil. This format works for all environment.
-            p.StartInfo.Arguments =
-                String.Format("/codeCustomization:\"Microsoft.Xrm.Client.CodeGeneration.CodeCustomization, Microsoft.Xrm.Client.CodeGeneration\" /url:{0} /username:{1} /password:{2} /out:\"{3}\" /namespace:Microsoft.Pfe.Xrm /serviceContextName:XrmContext",
-                props.OrgUriActual,
-                props.UserName,
-                props.Password,
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "XrmData.cs"));
+            if (props.UserName != string.Empty)
+            {
+                p.StartInfo.Arguments =
+                    String.Format(
+                        "{4} /connectionstring:\"AuthType={5}; Url={0}{7}; UserName={1}; Password={2}; Domain={8}\"; /out:\"{3}\" /namespace:{6} /serviceContextName:XrmContext",
+                        props.OrgUri,
+                        props.UserName,
+                        props.Password,
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, generationType+".cs"),
+                        svcUtilCodeCustomizationParams,
+                        authProviderType,
+                        generatedNameSpace,
+                        props.ConnectedOrgUniqueName,
+                        props.DomainName);
+            }
+            else
+            {
+                p.StartInfo.Arguments =
+                    String.Format(
+                        "{2} /connectionstring:\"Url={0}; AuthType=AD;\" /out:\"{1}\" /namespace:{3} /serviceContextName:XrmContext",
+                        props.OrgUriActual,
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, generationType + ".cs"),
+                        svcUtilCodeCustomizationParams,
+                        generatedNameSpace);
+            }
 
             // Execute and wait until it complited.
             p.Start();
             p.WaitForExit();
-
             // Read generate file and return it.
-            return System.IO.File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "XrmData.cs"));
+            return System.IO.File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, generationType + ".cs"));
         }
 
         /// <summary>
@@ -191,7 +245,7 @@ namespace Microsoft.Pfe.Xrm.ViewModel
         /// </summary>
         /// <param name="code">code to be compiled</param>
         /// <param name="name">assembly name</param>
-        private void BuildAssembly(string code, string name)
+        private void BuildAssembly(string[] code, string name)
         {
             // Use the CSharpCodeProvider to compile the generated code:
             CompilerResults results;
@@ -203,10 +257,10 @@ namespace Microsoft.Pfe.Xrm.ViewModel
                     false);
                 // Force load Microsoft.Xrm.Sdk assembly.
                 options.ReferencedAssemblies.Add(typeof(Microsoft.Xrm.Sdk.Entity).Assembly.Location);
-                options.ReferencedAssemblies.Add(typeof(Microsoft.Xrm.Client.CrmEntity).Assembly.Location);
-
+                LoadMessage = "Building LINQPad context assembly..";
                 // Compile
                 results = codeProvider.CompileAssemblyFromSource(options, code);
+                Message = "";
             }
             if (results.Errors.Count > 0)
                 throw new Exception
@@ -226,53 +280,7 @@ namespace Microsoft.Pfe.Xrm.ViewModel
             {
                 return new RelayCommand(async () =>
                 {
-                    // Establish the Login control
-                    CrmLogin ctrl = new CrmLogin();
-                    // Wire Event to login response. 
-                    ctrl.ConnectionToCrmCompleted += ctrl_ConnectionToCrmCompleted;
-                    // Show the dialog. 
-                    ctrl.ShowDialog();
-
-                    // Handel return. 
-                    if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null && ctrl.CrmConnectionMgr.CrmSvc.IsReady)
-                    {
-                        IsLoading = true;
-                        LoadMessage = "Loading Data....";
-
-                        // Handel return. 
-                        if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null && ctrl.CrmConnectionMgr.CrmSvc.IsReady)
-                        {
-                            // Assign local property
-                            props.OrgUriActual = ctrl.CrmConnectionMgr.CrmSvc.CrmConnectOrgUriActual.ToString();
-                            props.OrgUri = ctrl.CrmConnectionMgr.ConnectedOrgPublishedEndpoints[EndpointType.WebApplication];
-                            
-                            props.FriendlyName = ctrl.CrmConnectionMgr.CrmSvc.ConnectedOrgFriendlyName;
-                            props.AuthenticationProviderType = ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ServiceConfiguration.AuthenticationType.ToString();
-
-                            ClientCredentials credentials = ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ClientCredentials;
-                            if (credentials.UserName.UserName != null)
-                            {
-                                props.UserName = credentials.UserName.UserName;
-                                props.Password = credentials.UserName.Password;
-                            }
-                            else if(credentials.Windows.ClientCredential.UserName !=null)
-                            {
-                                props.DomainName = credentials.Windows.ClientCredential.Domain;
-                                props.UserName = credentials.Windows.ClientCredential.UserName;
-                                props.Password = credentials.Windows.ClientCredential.Password;
-                            }
-                        }
-                        
-                        // Then generate assembly
-                        await Task.Run(() => LoadData());
-
-                        // Set Context class name.
-                        props._cxInfo.CustomTypeInfo.CustomTypeName = "Microsoft.Pfe.Xrm.XrmContext";
-
-                        IsLoading = false;
-                    }
-                    else
-                        MessageBox.Show("BadConnect");
+                    await InitConnection("Loading Data....", ConnectionType.Connect);
                 });
             }
         }
@@ -284,51 +292,9 @@ namespace Microsoft.Pfe.Xrm.ViewModel
         {
             get
             {
-                return new RelayCommand(() =>
+                return new RelayCommand(async () =>
                 {
-                    // Establish the Login control
-                    CrmLogin ctrl = new CrmLogin();
-                    // Wire Event to login response. 
-                    ctrl.ConnectionToCrmCompleted += ctrl_ConnectionToCrmCompleted;
-                    // Show the dialog. 
-                    ctrl.ShowDialog();
-
-                    // Handel return. 
-                    if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null && ctrl.CrmConnectionMgr.CrmSvc.IsReady)
-                    {
-                        IsLoading = true;
-                        LoadMessage = "Updating Login Credential....";
-
-                        // Handel return. 
-                        if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null && ctrl.CrmConnectionMgr.CrmSvc.IsReady)
-                        {
-                            // Assign local property
-                            props.OrgUriActual = ctrl.CrmConnectionMgr.CrmSvc.CrmConnectOrgUriActual.ToString();
-                            props.OrgUri = ctrl.CrmConnectionMgr.ConnectedOrgPublishedEndpoints[EndpointType.WebApplication];
-
-                            props.FriendlyName = ctrl.CrmConnectionMgr.CrmSvc.ConnectedOrgFriendlyName;
-                            props.AuthenticationProviderType = ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ServiceConfiguration.AuthenticationType.ToString();
-
-                            ClientCredentials credentials = ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ClientCredentials;
-                            if (credentials.UserName.UserName != null)
-                            {
-                                props.UserName = credentials.UserName.UserName;
-                                props.Password = credentials.UserName.Password;
-                            }
-                            else if (credentials.Windows.ClientCredential.UserName != null)
-                            {
-                                props.DomainName = credentials.Windows.ClientCredential.Domain;
-                                props.UserName = credentials.Windows.ClientCredential.UserName;
-                                props.Password = credentials.Windows.ClientCredential.Password;
-                            }
-
-                            IsLoaded = true;
-                        }
-                                               
-                        IsLoading = false;
-                    }
-                    else
-                        MessageBox.Show("BadConnect");
+                    await InitConnection("Loading Data....", ConnectionType.ChangeCredentialConnect);
                 });
             }
         }
@@ -355,5 +321,78 @@ namespace Microsoft.Pfe.Xrm.ViewModel
             }
         }
         #endregion
-    }    
+
+        private async Task InitConnection(string message, ConnectionType connectionType)
+        {
+            // Establish the Login control
+            CrmLogin ctrl = new CrmLogin();
+            // Wire Event to login response. 
+            ctrl.ConnectionToCrmCompleted += ctrl_ConnectionToCrmCompleted;
+            // Show the dialog. 
+            ctrl.ShowDialog();
+
+            // Handel return. 
+            if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null && ctrl.CrmConnectionMgr.CrmSvc.IsReady)
+            {
+                IsLoading = true;
+                LoadMessage = message;
+
+                // Handel return. 
+                if (ctrl.CrmConnectionMgr != null && ctrl.CrmConnectionMgr.CrmSvc != null &&
+                    ctrl.CrmConnectionMgr.CrmSvc.IsReady)
+                {
+                    // Assign local property
+                    props.OrgUriActual = ctrl.CrmConnectionMgr.CrmSvc.CrmConnectOrgUriActual.ToString();
+                    props.ConnectedOrgUniqueName = ctrl.CrmConnectionMgr.CrmSvc.ConnectedOrgUniqueName;
+                    props.OrgUri = ctrl.CrmConnectionMgr.ConnectedOrgPublishedEndpoints[EndpointType.WebApplication];
+
+                    props.FriendlyName = ctrl.CrmConnectionMgr.CrmSvc.ConnectedOrgFriendlyName;
+                    props.AuthenticationProviderType =
+                        ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ServiceConfiguration.AuthenticationType;
+
+                    ClientCredentials credentials = ctrl.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy.ClientCredentials;
+                    if (credentials.UserName.UserName != null)
+                    {
+                        props.UserName = credentials.UserName.UserName;
+                        props.Password = credentials.UserName.Password;
+                    }
+                    else if (credentials.Windows.ClientCredential.UserName != null)
+                    {
+                        props.DomainName = credentials.Windows.ClientCredential.Domain;
+                        props.UserName = credentials.Windows.ClientCredential.UserName;
+                        props.Password = credentials.Windows.ClientCredential.Password;
+                    }
+                    if (connectionType == ConnectionType.ChangeCredentialConnect)
+                    {
+                        IsLoaded = true;
+                    }
+                }
+
+                if (connectionType == ConnectionType.Connect)
+                {
+                    // Then generate assembly
+                    await Task.Run(() => LoadData());
+
+                    // Set Context class name.
+                    props._cxInfo.CustomTypeInfo.CustomTypeName = "Microsoft.Pfe.Xrm.Entities.XrmContext";
+                }
+
+                IsLoading = false;
+            }
+            else
+                MessageBox.Show("BadConnect");
+        }
+    }
+
+    internal enum ConnectionType
+    {
+        Connect,
+        ChangeCredentialConnect
+    }
+
+    internal enum CodeGenerationType
+    {
+        Entity,
+        OptionSet
+    }
 }
